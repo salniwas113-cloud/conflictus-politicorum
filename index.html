@@ -2,7 +2,7 @@
 <html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="  width=device-width, initial-scale=1.0">
     <title>Conflictus Politicorum</title>
     
     <!-- Bootstrap 5 + Dark Mode Support -->
@@ -40,7 +40,7 @@
             <div id="sidebar" class="border-start">
                 <div id="login-panel" class="panel">
                     <h5>Welcome</h5>
-                    <p>Loading your player ID...</p>
+                    <p>Initializing game...</p>
                 </div>
                 
                 <div id="no-nation-panel" class="panel d-none">
@@ -94,8 +94,8 @@
 
     <script>
         // ===== REPLACE WITH YOUR OWN SUPABASE CONFIG =====
-        const supabaseUrl = 'https://vpjnskyyxeijnmysoxuz.supabase.co';
-        const supabaseAnonKey = 'sb_publishable_2pRXsU3vIMmJLjIL1WR-dw_-OCmHk-M';
+        const supabaseUrl = 'https://YOUR_PROJECT.supabase.co';
+        const supabaseAnonKey = 'YOUR_ANON_PUBLIC_KEY';
         const supabase = Supabase.createClient(supabaseUrl, supabaseAnonKey);
         // ===============================================
 
@@ -149,12 +149,12 @@
         }
 
         function initMap() {
-            map = L.map('map').setView([0, 0], 2);
+            map = L.map('map').setView([-26, 28], 4); // Centered on Southern Africa
             lightTiles.addTo(map);
 
             fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson')
                 .then(r => r.json())
-                .then(async data => {
+                .then(data => {
                     geoLayer = L.geoJSON(data, {
                         style: () => ({ fillColor: '#888', weight: 1, color: '#333', fillOpacity: 0.3 }),
                         onEachFeature: (feature, layer) => {
@@ -164,36 +164,51 @@
                         }
                     }).addTo(map);
 
-                    await loadAllCountriesStyles();
+                    loadAllCountriesStyles();
                     setupRealtime();
+                })
+                .catch(err => {
+                    console.error('Failed to load country outlines:', err);
+                    L.popup({permanent: true})
+                        .setLatLng([-26, 28])
+                        .setContent('Country outlines failed to load.<br>Alliance colors may not update.<br>Check console.')
+                        .openOn(map);
                 });
         }
 
         async function loadAllCountriesStyles() {
-            const { data } = await supabase.from('countries').select('*');
-            if (data) {
-                data.forEach(c => {
-                    const layer = isoToLayer[c.iso];
-                    if (layer && c.alliance_color) {
-                        layer.setStyle({ fillColor: c.alliance_color, fillOpacity: 0.7 });
-                    }
-                });
+            try {
+                const { data } = await supabase.from('countries').select('*');
+                if (data) {
+                    data.forEach(c => {
+                        const layer = isoToLayer[c.iso];
+                        if (layer && c.alliance_color) {
+                            layer.setStyle({ fillColor: c.alliance_color, fillOpacity: 0.7 });
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to load country styles:', err);
             }
         }
 
         function setupRealtime() {
-            supabase.channel('countries-changes')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'countries' }, payload => {
-                    const record = payload.new || payload.old || {};
-                    const iso = record.iso;
-                    const layer = isoToLayer[iso];
-                    if (layer) {
-                        const color = (payload.new && payload.new.alliance_color) ? payload.new.alliance_color : '#888';
-                        const opacity = (payload.new && payload.new.alliance_color) ? 0.7 : 0.3;
-                        layer.setStyle({ fillColor: color, fillOpacity: opacity });
-                    }
-                })
-                .subscribe();
+            try {
+                supabase.channel('countries-changes')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'countries' }, payload => {
+                        const record = payload.new || payload.old || {};
+                        const iso = record.iso;
+                        const layer = isoToLayer[iso];
+                        if (layer) {
+                            const color = (payload.new && payload.new.alliance_color) ? payload.new.alliance_color : '#888';
+                            const opacity = (payload.new && payload.new.alliance_color) ? 0.7 : 0.3;
+                            layer.setStyle({ fillColor: color, fillOpacity: opacity });
+                        }
+                    })
+                    .subscribe();
+            } catch (err) {
+                console.error('Realtime subscription failed (non-critical):', err);
+            }
         }
 
         async function showCountryPopup(feature, layer) {
@@ -201,8 +216,13 @@
             const name = feature.properties.NAME || 'Unknown';
             if (!iso || iso === '-99') return;
 
-            const { data: countryRows } = await supabase.from('countries').select('*').eq('iso', iso);
-            const countryData = countryRows && countryRows[0] || {};
+            let countryData = {};
+            try {
+                const { data: rows } = await supabase.from('countries').select('*').eq('iso', iso);
+                countryData = rows && rows[0] || {};
+            } catch (err) {
+                console.error('Failed to fetch country data:', err);
+            }
 
             let content = `<h6>${name}</h6>`;
             if (countryData.nation_name) {
@@ -222,55 +242,74 @@
             const nationName = prompt("Enter your nation name:", "My Nation");
             if (!nationName) return;
 
-            const { data: existing } = await supabase.from('countries').select('iso').eq('iso', iso);
-            if (existing && existing.length > 0) return alert('This country is already claimed!');
+            try {
+                const { data: existing } = await supabase.from('countries').select('iso').eq('iso', iso);
+                if (existing && existing.length > 0) return alert('This country is already claimed!');
 
-            const initialResources = { gold: 500, iron: 300, oil: 200 };
-            const buildings = { goldMine: 0, ironMine: 0, oilMine: 0 };
+                const initialResources = { gold: 500, iron: 300, oil: 200 };
+                const buildings = { goldMine: 0, ironMine: 0, oilMine: 0 };
 
-            await supabase.from('nations').insert({
-                owner: playerId,
-                nation_name: nationName,
-                country_iso: iso,
-                country_name: countryName,
-                resources: initialResources,
-                buildings: buildings,
-                last_tick: Date.now()
-            });
+                await supabase.from('nations').insert({
+                    owner: playerId,
+                    nation_name: nationName,
+                    country_iso: iso,
+                    country_name: countryName,
+                    resources: initialResources,
+                    buildings: buildings,
+                    last_tick: Date.now()
+                });
 
-            await supabase.from('countries').upsert({
-                iso: iso,
-                nation_name: nationName,
-                owner: playerId
-            });
+                await supabase.from('countries').upsert({
+                    iso: iso,
+                    nation_name: nationName,
+                    owner: playerId
+                });
 
-            await loadNation();
+                await loadNation(); // reload to show new nation
+            } catch (err) {
+                console.error(err);
+                alert('Claim failed - check console');
+            }
         };
 
         async function loadNation() {
-            const { data, error } = await supabase.from('nations').select('*').eq('owner', playerId).maybeSingle();
-            if (data) {
+            try {
+                const { data, error } = await supabase.from('nations').select('*').eq('owner', playerId).maybeSingle();
+                if (error) throw error;
+
                 currentNation = data;
-                const { data: countryData } = await supabase.from('countries').select('alliance, alliance_color').eq('iso', currentNation.country_iso).single();
-                currentNation.alliance = (countryData && countryData.alliance) || null;
 
-                document.getElementById('login-panel').classList.add('d-none');
-                document.getElementById('no-nation-panel').classList.add('d-none');
-                document.getElementById('nation-panel').classList.remove('d-none');
+                if (currentNation) {
+                    try {
+                        const { data: countryData } = await supabase.from('countries').select('alliance, alliance_color').eq('iso', currentNation.country_iso).single();
+                        currentNation.alliance = (countryData && countryData.alliance) || null;
+                    } catch (err) {
+                        console.error('Failed to load alliance data:', err);
+                    }
 
-                document.getElementById('nation-name').textContent = currentNation.nation_name;
-                document.getElementById('country-name').textContent = currentNation.country_name;
-                document.getElementById('alliance-display').textContent = currentNation.alliance || 'None';
+                    document.getElementById('no-nation-panel').classList.add('d-none');
+                    document.getElementById('nation-panel').classList.remove('d-none');
 
-                updateResourcesDisplay();
-                buildUI();
-                calculateResources();
+                    document.getElementById('nation-name').textContent = currentNation.nation_name;
+                    document.getElementById('country-name').textContent = currentNation.country_name;
+                    document.getElementById('alliance-display').textContent = currentNation.alliance || 'None';
 
-                // Check for new resources every minute while online
-                setInterval(calculateResources, 60000);
-            } else {
-                document.getElementById('login-panel').classList.add('d-none');
+                    updateResourcesDisplay();
+                    buildUI();
+                    calculateResources();
+                    setInterval(calculateResources, 60000);
+                } else {
+                    document.getElementById('no-nation-panel').classList.remove('d-none');
+                }
+            } catch (err) {
+                console.error('Database error:', err);
                 document.getElementById('no-nation-panel').classList.remove('d-none');
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-danger';
+                alertDiv.innerHTML = '<strong>Database connection failed</strong><br>Check:<br>• Supabase URL & anon key<br>• Tables created exactly<br>• Row Level Security DISABLED on all three tables<br>See browser console (F12) for details.';
+                document.getElementById('sidebar').insertBefore(alertDiv, document.getElementById('no-nation-panel'));
+            } finally {
+                document.getElementById('login-panel').classList.add('d-none');
             }
         }
 
@@ -291,16 +330,21 @@
                 const newTick = currentNation.last_tick + hoursPassed * (1000 * 60 * 60);
                 currentNation.last_tick = newTick;
 
-                await supabase.from('nations').update({
-                    resources: currentNation.resources,
-                    last_tick: newTick
-                }).eq('owner', playerId);
+                try {
+                    await supabase.from('nations').update({
+                        resources: currentNation.resources,
+                        last_tick: newTick
+                    }).eq('owner', playerId);
+                } catch (err) {
+                    console.error('Failed to save resources:', err);
+                }
 
                 updateResourcesDisplay();
             }
         }
 
         function updateResourcesDisplay() {
+            if (!currentNation) return;
             document.getElementById('gold').textContent = Math.floor(currentNation.resources.gold);
             document.getElementById('iron').textContent = Math.floor(currentNation.resources.iron);
             document.getElementById('oil').textContent = Math.floor(currentNation.resources.oil);
@@ -334,13 +378,17 @@
             currentNation.resources.gold -= cost;
             currentNation.buildings[key] = (currentNation.buildings[key] || 0) + 1;
 
-            await supabase.from('nations').update({
-                resources: currentNation.resources,
-                buildings: currentNation.buildings
-            }).eq('owner', playerId);
-
-            updateResourcesDisplay();
-            buildUI();
+            try {
+                await supabase.from('nations').update({
+                    resources: currentNation.resources,
+                    buildings: currentNation.buildings
+                }).eq('owner', playerId);
+                updateResourcesDisplay();
+                buildUI();
+            } catch (err) {
+                console.error('Upgrade failed:', err);
+                alert('Upgrade failed - check console');
+            }
         }
 
         // Alliance handling
@@ -349,27 +397,36 @@
             if (!name) return alert('Enter alliance name');
             const color = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
 
-            const { error } = await supabase.from('alliances').insert({ name, leader: playerId, color });
-            if (error) return alert('Alliance creation failed (maybe name taken)');
+            try {
+                const { error } = await supabase.from('alliances').insert({ name, leader: playerId, color });
+                if (error) throw error;
 
-            await supabase.from('countries').update({ alliance: name, alliance_color: color }).eq('iso', currentNation.country_iso);
-            currentNation.alliance = name;
-            document.getElementById('alliance-display').textContent = name;
+                await supabase.from('countries').update({ alliance: name, alliance_color: color }).eq('iso', currentNation.country_iso);
+                currentNation.alliance = name;
+                document.getElementById('alliance-display').textContent = name;
+            } catch (err) {
+                console.error(err);
+                alert('Failed to create alliance (name taken?)');
+            }
         };
 
         document.getElementById('join-alliance').onclick = async () => {
             const name = document.getElementById('alliance-input').value.trim();
             if (!name) return alert('Enter alliance name');
 
-            const { data: allianceData } = await supabase.from('alliances').select('color').eq('name', name).single();
-            if (!allianceData) return alert('Alliance not found');
+            try {
+                const { data: allianceData, error } = await supabase.from('alliances').select('color').eq('name', name).single();
+                if (error || !allianceData) throw error || 'Not found';
 
-            await supabase.from('countries').update({ alliance: name, alliance_color: allianceData.color }).eq('iso', currentNation.country_iso);
-            currentNation.alliance = name;
-            document.getElementById('alliance-display').textContent = name;
+                await supabase.from('countries').update({ alliance: name, alliance_color: allianceData.color }).eq('iso', currentNation.country_iso);
+                currentNation.alliance = name;
+                document.getElementById('alliance-display').textContent = name;
+            } catch (err) {
+                alert('Alliance not found');
+            }
         };
 
-        // Start everything
+        // Start
         initMap();
         loadNation();
     </script>
